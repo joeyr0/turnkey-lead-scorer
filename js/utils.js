@@ -109,19 +109,16 @@ function clamp(val, min, max) {
 }
 
 // Check if a hook is generic/empty (triggers score-3 downgrade)
+// Only downgrade if the hook is truly empty or clearly a placeholder
 function isGenericHook(hook) {
-  if (!hook || hook.trim().length < 25) return true;
-  const generic = [
-    /could (explore|consider|benefit|potentially|possibly)/i,
-    /might (benefit|be relevant|consider)/i,
-    /potential (synergy|fit|opportunity|match)/i,
-    /may be (relevant|interested|applicable)/i,
+  if (!hook || hook.trim().length < 20) return true;
+  const placeholder = [
     /no specific hook/i,
     /not enough (info|information|data)/i,
     /unclear relevance/i,
-    /generic/i
+    /n\/a/i,
   ];
-  return generic.some(re => re.test(hook));
+  return placeholder.some(re => re.test(hook));
 }
 
 // Action display config

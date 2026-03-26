@@ -86,7 +86,7 @@ async function startScoring(testMode = false) {
   // Reset progress
   APP_STATE.scoringProgress = { companyTotal: 0, companyDone: 0, contactTotal: 0, contactDone: 0 };
   const title = document.getElementById('scoring-title');
-  if (title) title.textContent = testMode ? '⚡ Test scoring 20 companies…' : '⚡ Scoring your list…';
+  if (title) title.textContent = testMode ? '🔑 Validating API key…' : '🔑 Validating API key…';
   const stopBtn = document.getElementById('stop-btn');
   if (stopBtn) { stopBtn.textContent = '⏹ Stop'; stopBtn.disabled = false; }
 
@@ -97,6 +97,12 @@ async function startScoring(testMode = false) {
   updateScoringProgress();
 
   try {
+    // Validate API key before starting
+    const keyOk = await validateApiKey();
+    if (!keyOk) return;
+
+    if (title) title.textContent = testMode ? '⚡ Test scoring 20 companies…' : '⚡ Scoring your list…';
+
     await scoreCompanies();
 
     const compDone = document.getElementById('company-scoring-status');

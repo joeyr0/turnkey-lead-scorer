@@ -161,6 +161,29 @@ async function callOpenAI(systemPrompt, userContent, retries = 1) {
   throw lastErr;
 }
 
+// ---- API key validation ----
+
+async function validateApiKey() {
+  const errEl = document.getElementById('scoring-error');
+  try {
+    const resp = await fetch('https://api.openai.com/v1/models', {
+      headers: { 'Authorization': `Bearer ${APP_STATE.apiKey}` }
+    });
+    if (resp.status === 401) {
+      if (errEl) { errEl.textContent = '❌ Invalid API key — check your OpenAI key and try again.'; errEl.classList.remove('hidden'); }
+      return false;
+    }
+    if (!resp.ok) {
+      if (errEl) { errEl.textContent = `❌ API error ${resp.status} — check your key and network connection.`; errEl.classList.remove('hidden'); }
+      return false;
+    }
+    return true;
+  } catch (e) {
+    if (errEl) { errEl.textContent = `❌ Network error: ${e.message}`; errEl.classList.remove('hidden'); }
+    return false;
+  }
+}
+
 // ---- Company scoring orchestration ----
 
 async function scoreCompanies() {
@@ -226,6 +249,13 @@ async function scoreCompanies() {
       }
     } catch (err) {
       console.error('Company scoring batch error:', err);
+      const errEl = document.getElementById('scoring-error');
+      if (errEl) {
+        const msg = err.message || String(err);
+        const hint = msg.includes('401') ? ' (Invalid API key)' : msg.includes('429') ? ' (Rate limited — wait and retry)' : '';
+        errEl.textContent = `⚠ Batch ${Math.floor(i/10)+1} failed: ${msg}${hint}`;
+        errEl.classList.remove('hidden');
+      }
       for (const g of batch) {
         g.scoringFailed = true;
         g.icpScore = 2;

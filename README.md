@@ -1,5 +1,7 @@
 # Turnkey Lead Scoring & ICP Fit System
 
+🔗 **Live:** [https://joeyr0.github.io/turnkey-lead-scorer/](https://joeyr0.github.io/turnkey-lead-scorer/)
+
 Score prospect lists against Turnkey's ICP using a two-pass AI scoring system. Upload a CSV or XLSX, get every company and contact scored, outreach hooks generated, and an enriched CSV exported — ready for the BDR queue.
 
 ## What it does

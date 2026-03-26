@@ -386,9 +386,14 @@ function renderPreFlight() {
     </div>
 
     <div class="preflight-actions">
-      <button id="score-btn" class="btn-primary btn-large" onclick="startScoring()"
+      <button class="btn-secondary btn-large" onclick="startScoring(true)"
+        ${!cm.domain ? 'disabled title="Map the Domain column first"' : ''}
+        title="Score the first 20 companies to preview results before running the full list">
+        🧪 Test Score (20)
+      </button>
+      <button id="score-btn" class="btn-primary btn-large" onclick="startScoring(false)"
         ${!cm.domain ? 'disabled title="Map the Domain column first"' : ''}>
-        ⚡ Score List
+        ⚡ Score Full List
       </button>
       ${APP_STATE.isCompanyOnlyList ? '<div class="company-only-note">Company-only list detected — contact scoring will be skipped</div>' : ''}
     </div>

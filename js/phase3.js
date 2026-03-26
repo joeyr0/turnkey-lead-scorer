@@ -173,6 +173,8 @@ async function scoreContacts() {
     if (i + 15 < toScore.length) {
       await sleep(800);
     }
+
+    if (APP_STATE.stopRequested) break;
   }
 }
 

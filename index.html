@@ -5,20 +5,17 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Turnkey Lead Scoring & ICP Fit System</title>
 
-  <!-- CDN dependencies -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
-
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-
 <div class="app">
 
-  <!-- ===== GLOBAL HEADER ===== -->
+  <!-- GLOBAL HEADER -->
   <header class="global-header">
     <div class="logo">
       Turnkey Lead Scorer
@@ -31,37 +28,36 @@
     </div>
   </header>
 
-  <!-- ===== UPLOAD VIEW ===== -->
+  <!-- UPLOAD VIEW -->
   <div id="view-upload" class="view">
     <div class="upload-inner">
       <h1 class="upload-title">Score Your Prospect List</h1>
       <p class="upload-subtitle">
-        Upload a CSV or XLSX of prospects. The tool scores each company and contact<br>
+        Upload a CSV or XLSX of prospects. The tool scores each company and contact
         against Turnkey's ICP, generates outreach hooks, and exports an enriched CSV.
       </p>
-
       <div id="drop-zone">
         <div class="drop-icon">📂</div>
         <div class="drop-title">Drop your CSV or XLSX here</div>
         <div class="drop-sub">or click to browse — CSV and XLSX supported</div>
         <input type="file" id="file-input" accept=".csv,.xlsx,.xls">
       </div>
-
       <div id="upload-error" class="upload-error hidden"></div>
     </div>
   </div>
 
-  <!-- ===== PRE-FLIGHT VIEW ===== -->
+  <!-- PRE-FLIGHT VIEW -->
   <div id="view-preflight" class="view hidden">
-    <div id="preflight-content">
-      <!-- Rendered dynamically by renderPreFlight() -->
-    </div>
+    <div id="preflight-content"></div>
   </div>
 
-  <!-- ===== SCORING PROGRESS VIEW ===== -->
+  <!-- SCORING PROGRESS VIEW -->
   <div id="view-scoring" class="view hidden">
     <div class="scoring-inner">
-      <div class="scoring-title">⚡ Scoring your list…</div>
+      <div class="scoring-header">
+        <div class="scoring-title" id="scoring-title">⚡ Scoring your list…</div>
+        <button id="stop-btn" class="btn-stop" onclick="requestStop()">⏹ Stop</button>
+      </div>
 
       <div class="progress-block">
         <div class="progress-label">
@@ -89,41 +85,48 @@
     </div>
   </div>
 
-  <!-- ===== RESULTS VIEW ===== -->
+  <!-- RESULTS VIEW -->
   <div id="view-results" class="view hidden">
 
-    <!-- Audit summary banner (shown after audit) -->
+    <!-- Audit banner -->
     <div id="audit-banner" class="audit-banner hidden"></div>
 
-    <!-- Stats bar -->
-    <div id="stats-bar" class="stats-bar"></div>
-
-    <!-- Action bar: filter pills + view toggle + buttons -->
-    <div class="action-bar">
-      <div class="filter-pills">
-        <button class="filter-pill active" data-filter="ALL"      onclick="setFilter('ALL')">All</button>
-        <button class="filter-pill"         data-filter="PURSUE"   onclick="setFilter('PURSUE')">✓ Pursue</button>
-        <button class="filter-pill"         data-filter="RESEARCH" onclick="setFilter('RESEARCH')">🔍 Research</button>
-        <button class="filter-pill"         data-filter="MONITOR"  onclick="setFilter('MONITOR')">○ Monitor</button>
-        <button class="filter-pill"         data-filter="REFERRAL" onclick="setFilter('REFERRAL')">🤝 Referral</button>
-        <button class="filter-pill"         data-filter="SKIP"     onclick="setFilter('SKIP')">× Skip</button>
+    <!-- Top toolbar -->
+    <div class="results-toolbar">
+      <div class="toolbar-left">
+        <input type="text" id="table-search" class="table-search" placeholder="Search all columns…" oninput="onSearchChange()">
+        <div class="filter-pills" id="filter-pills">
+          <button class="filter-pill active" data-filter="ALL"      onclick="setFilter('ALL')">All</button>
+          <button class="filter-pill"        data-filter="PURSUE"   onclick="setFilter('PURSUE')">✓ Pursue</button>
+          <button class="filter-pill"        data-filter="RESEARCH" onclick="setFilter('RESEARCH')">🔍 Research</button>
+          <button class="filter-pill"        data-filter="MONITOR"  onclick="setFilter('MONITOR')">○ Monitor</button>
+          <button class="filter-pill"        data-filter="REFERRAL" onclick="setFilter('REFERRAL')">🤝 Referral</button>
+          <button class="filter-pill"        data-filter="SKIP"     onclick="setFilter('SKIP')">× Skip</button>
+        </div>
       </div>
-      <div class="right-controls">
-        <button class="view-btn active" data-mode="bdr"  onclick="setViewMode('bdr')">BDR View</button>
-        <button class="view-btn"        data-mode="full" onclick="setViewMode('full')">Full View</button>
-        <button id="audit-btn"  class="btn-action btn-audit"  onclick="runAudit()" disabled>🔍 Audit Scores</button>
+      <div class="toolbar-right">
+        <button class="btn-columns" onclick="toggleColumnsMenu()">Columns ▾</button>
+        <div id="columns-menu" class="columns-menu hidden"></div>
+        <button id="audit-btn"  class="btn-action btn-audit"  onclick="runAudit()"  disabled>🔍 Audit</button>
         <button id="export-btn" class="btn-action btn-export" onclick="exportCSV()" disabled>↓ Export CSV</button>
       </div>
     </div>
 
-    <!-- Company cards -->
-    <div id="company-cards"></div>
+    <!-- Results summary row -->
+    <div class="results-summary" id="results-summary"></div>
+
+    <!-- Table -->
+    <div class="table-wrap">
+      <table id="results-table">
+        <thead id="table-head"></thead>
+        <tbody id="table-body"></tbody>
+      </table>
+    </div>
 
   </div><!-- /view-results -->
 
 </div><!-- /app -->
 
-<!-- ===== JavaScript — load in dependency order ===== -->
 <script src="js/data.js"></script>
 <script src="js/utils.js"></script>
 <script src="js/phase1.js"></script>
@@ -133,6 +136,5 @@
 <script src="js/phase5.js"></script>
 <script src="js/phase6.js"></script>
 <script src="js/app.js"></script>
-
 </body>
 </html>

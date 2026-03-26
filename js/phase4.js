@@ -1,5 +1,5 @@
 // ============================================================
-// PHASE 4: Action logic, sorting, results rendering
+// PHASE 4: Action logic, sorting, table rendering
 // ============================================================
 
 // ---- Company Action ----
@@ -14,38 +14,30 @@ function getCompanyAction(group) {
   if (score <= 2) return 'SKIP';
   if (score === 3) return 'MONITOR';
 
-  // Score 4-5
-  if (APP_STATE.isCompanyOnlyList) return 'PURSUE'; // no contacts to evaluate
+  if (APP_STATE.isCompanyOnlyList) return 'PURSUE';
 
   const hasDecisionMaker = (group.contacts || []).some(c => (c.contactScore || 0) >= 4);
   return hasDecisionMaker ? 'PURSUE' : 'RESEARCH_CONTACTS';
 }
 
-// JS-based title scoring for contacts that weren't scored via API
-// (customer contacts, or any contact where contactScore is null)
+// ---- Contact Action ----
+
 function jsContactScore(contact) {
   const t = (contact.title || '').toLowerCase();
-  // Always exclude
   if (/\b(intern|internship|student|co-op)\b/.test(t)) return 1;
-  if (/\b(hr|human resources|recruit|talent acquisition|talent partner)\b/.test(t)) return 1;
-  if (/\b(journalist|reporter|media|analyst)\b/.test(t)) return 1;
-  // High value
+  if (/\b(hr |human resources|recruit|talent acquisition|talent partner)\b/.test(t)) return 1;
+  if (/\b(journalist|reporter|media)\b/.test(t)) return 1;
   if (/\b(cto|ceo|coo|co-founder|cofounder|founder|president)\b/.test(t)) return 5;
-  if (/\b(vp |vice president|chief |head of|director of)\b/.test(t)) return 4;
-  // Mid value
+  if (/\b(vp |vice president|chief |head of|director)\b/.test(t)) return 4;
   if (/\b(manager|lead |senior |principal |architect|engineer)\b/.test(t)) return 3;
-  // Low value
-  if (/\b(marketing|sales|finance|legal|accounting|operations|support|customer)\b/.test(t)) return 2;
-  return 2; // default
+  if (/\b(marketing|sales|finance|legal|ops|support|customer)\b/.test(t)) return 2;
+  return 2;
 }
-
-// ---- Contact Action ----
 
 function getContactAction(contact, group) {
   const companyScore = Math.max(group.icpScore || 0, group.tvcScore || 0);
 
   if (group.flags.isExistingCustomer) {
-    // Use API score if available, otherwise fall back to JS title scoring
     const score = contact.contactScore != null ? contact.contactScore : jsContactScore(contact);
     return score >= 3 ? 'ROUTE_TO_CSM' : 'SKIP';
   }
@@ -61,8 +53,6 @@ function getContactAction(contact, group) {
   return 'SKIP';
 }
 
-// ---- Calculate all actions ----
-
 function calculateAllActions() {
   for (const group of APP_STATE.companyGroups) {
     group.companyAction = getCompanyAction(group);
@@ -77,335 +67,399 @@ function calculateAllActions() {
 function getCompanySortBucket(group) {
   const action = group.companyAction;
   const isTier1 = group.flags.isTier1Target;
-  const isReferral = group.isReferralSource;
-
-  if (isReferral) return 5;
+  if (group.isReferralSource) return 5;
   if (action === 'PURSUE' && isTier1) return 0;
   if (action === 'RESEARCH_CONTACTS' && isTier1) return 1;
   if (action === 'PURSUE') return 2;
   if (action === 'RESEARCH_CONTACTS') return 3;
   if (action === 'MONITOR') return 4;
-  return 6; // SKIP
+  return 6;
 }
 
 function sortCompanies(groups) {
   return [...groups].sort((a, b) => {
-    const bA = getCompanySortBucket(a);
-    const bB = getCompanySortBucket(b);
+    const bA = getCompanySortBucket(a), bB = getCompanySortBucket(b);
     if (bA !== bB) return bA - bB;
-
     const sA = Math.max(a.icpScore || 0, a.tvcScore || 0);
     const sB = Math.max(b.icpScore || 0, b.tvcScore || 0);
     if (sA !== sB) return sB - sA;
-
     const csA = Math.max(0, ...(a.contacts || []).map(c => c.contactScore || 0));
     const csB = Math.max(0, ...(b.contacts || []).map(c => c.contactScore || 0));
     return csB - csA;
   });
 }
 
-// ---- Suggested role (for RESEARCH_CONTACTS) ----
+// ---- Flatten groups → table rows ----
 
-function getSuggestedRole(group) {
-  if (group.auditContactGap) return group.auditContactGap;
-  const angle = group.outreachAngle || '';
-  if (angle === 'VERIFIABLE_COMPUTE') return 'Head of Digital Assets / CISO';
-  const score = group.icpScore || 0;
-  if (score >= 5) {
-    // Crypto-native vs web2
-    const isCryptoNative = ['TRANSACTION_SIGNING','KEY_MANAGEMENT','AGENTIC_WALLETS'].includes(angle) ||
-      (angle === 'USER_WALLETS' && score === 5);
-    if (isCryptoNative) return 'CTO, VP Engineering, or Head of Protocol';
-    return 'Head of Crypto / Head of Digital Assets';
+function flattenToTableRows(groups) {
+  const rows = [];
+  for (const g of groups) {
+    const compScore = Math.max(g.icpScore || 0, g.tvcScore || 0);
+    const base = {
+      company:       g.companyName || '',
+      domain:        g.domain || '',
+      icpScore:      g.icpScore || '',
+      tvcScore:      g.tvcScore || '',
+      icpLabel:      g.icpLabel || '',
+      confidence:    g.confidence || '',
+      companyAction: g.companyAction || '',
+      companyScore:  compScore,
+      outreachAngle: g.outreachAngle || '',
+      solution:      g.primarySolution || '',
+      outreachHook:  g.outreachHook || '',
+      warmPath:      g.flags.warmPath || '',
+      isTier1:       g.flags.isTier1Target,
+      isCustomer:    g.flags.isExistingCustomer,
+      isCompetitor:  g.flags.isCompetitor || g.flags.isTvcEligibleCompetitor,
+      isReferral:    g.isReferralSource || false,
+      reasoning:     g.reasoning || '',
+      auditVerdict:  g.auditVerdict || '',
+      auditReasoning:g.auditReasoning || '',
+      auditContactGap: g.auditContactGap || '',
+      originalScore: g.originalIcpScore,
+      // reference to group for badge rendering
+      _group: g,
+    };
+
+    if (!APP_STATE.isCompanyOnlyList && g.contacts && g.contacts.length > 0) {
+      for (const c of g.contacts) {
+        rows.push({
+          ...base,
+          contactName:    c.name || '',
+          title:          c.title || '',
+          email:          c.email || '',
+          linkedin:       c.linkedin || '',
+          contactScore:   c.contactScore != null ? c.contactScore : '',
+          contactLabel:   c.contactLabel || '',
+          contactAction:  c.contactAction || '',
+          linkedinReq:    c.linkedinRequest || '',
+          contactReasoning: c.contactReasoning || '',
+          championPath:   c.championPath || '',
+        });
+      }
+    } else {
+      rows.push({
+        ...base,
+        contactName: '', title: '', email: '', linkedin: '',
+        contactScore: '', contactLabel: '', contactAction: '',
+        linkedinReq: '', contactReasoning: '', championPath: '',
+      });
+    }
   }
-  return 'CTO or Head of Engineering';
+  return rows;
+}
+
+// ---- Column definitions ----
+
+const COLUMN_DEFS = [
+  { key: 'company',        label: 'Company',         defaultOn: true  },
+  { key: 'domain',         label: 'Domain',          defaultOn: true  },
+  { key: 'contactName',    label: 'Contact',         defaultOn: true  },
+  { key: 'title',          label: 'Title',           defaultOn: true  },
+  { key: 'email',          label: 'Email',           defaultOn: false },
+  { key: 'icpScore',       label: 'ICP',             defaultOn: true  },
+  { key: 'tvcScore',       label: 'TVC',             defaultOn: false },
+  { key: 'companyAction',  label: 'Action',          defaultOn: true  },
+  { key: 'contactAction',  label: 'Contact Action',  defaultOn: true  },
+  { key: 'contactScore',   label: 'Contact Score',   defaultOn: false },
+  { key: 'warmPath',       label: 'Warm Path',       defaultOn: true  },
+  { key: 'outreachHook',   label: 'Hook',            defaultOn: true  },
+  { key: 'linkedinReq',    label: 'LinkedIn Request',defaultOn: true  },
+  { key: 'solution',       label: 'Solution',        defaultOn: false },
+  { key: 'confidence',     label: 'Confidence',      defaultOn: false },
+  { key: 'reasoning',      label: 'Reasoning',       defaultOn: false },
+];
+
+function initVisibleColumns() {
+  if (!APP_STATE.visibleColumns) {
+    APP_STATE.visibleColumns = new Set(
+      COLUMN_DEFS.filter(c => c.defaultOn).map(c => c.key)
+    );
+  }
 }
 
 // ---- Stats ----
 
 function computeStats(groups) {
-  const stats = { total: 0, pursue: 0, research: 0, monitor: 0, referral: 0, skip: 0, customers: 0 };
+  const s = { total: 0, pursue: 0, research: 0, monitor: 0, referral: 0, skip: 0, customers: 0 };
   for (const g of groups) {
-    stats.total++;
+    s.total++;
     const a = g.companyAction;
-    if (g.flags.isExistingCustomer) stats.customers++;
-    if (a === 'PURSUE') stats.pursue++;
-    else if (a === 'RESEARCH_CONTACTS') stats.research++;
-    else if (a === 'MONITOR') stats.monitor++;
-    else if (a === 'REFERRAL') stats.referral++;
-    else if (a === 'SKIP') stats.skip++;
+    if (g.flags.isExistingCustomer) s.customers++;
+    if (a === 'PURSUE') s.pursue++;
+    else if (a === 'RESEARCH_CONTACTS') s.research++;
+    else if (a === 'MONITOR') s.monitor++;
+    else if (a === 'REFERRAL') s.referral++;
+    else if (a === 'SKIP') s.skip++;
   }
-  return stats;
+  return s;
 }
 
-// ---- Results Rendering ----
+// ---- Main render ----
 
 function renderResults() {
   calculateAllActions();
-  const groups = sortCompanies(APP_STATE.companyGroups);
-  const stats = computeStats(groups);
+  initVisibleColumns();
+
+  const allGroups = sortCompanies(APP_STATE.companyGroups);
+  const stats = computeStats(allGroups);
   const filter = APP_STATE.currentFilter || 'ALL';
+  const search = (document.getElementById('table-search')?.value || '').toLowerCase().trim();
 
-  // Stats bar
-  document.getElementById('stats-bar').innerHTML = renderStatsBar(stats);
-
-  // Company cards
-  const container = document.getElementById('company-cards');
-
-  // Apply filter
-  let visible = groups.filter(g => {
-    if (filter === 'ALL') return g.companyAction !== 'SKIP' && !g.isReferralSource;
-    if (filter === 'PURSUE') return g.companyAction === 'PURSUE';
+  // Filter groups
+  let filtered = allGroups.filter(g => {
+    if (filter === 'ALL') return true;
+    if (filter === 'PURSUE')   return g.companyAction === 'PURSUE';
     if (filter === 'RESEARCH') return g.companyAction === 'RESEARCH_CONTACTS';
-    if (filter === 'MONITOR') return g.companyAction === 'MONITOR';
+    if (filter === 'MONITOR')  return g.companyAction === 'MONITOR';
     if (filter === 'REFERRAL') return g.isReferralSource;
-    if (filter === 'SKIP') return g.companyAction === 'SKIP';
+    if (filter === 'SKIP')     return g.companyAction === 'SKIP';
     return true;
   });
 
-  const skipped = groups.filter(g => g.companyAction === 'SKIP' && !g.isReferralSource);
-  const referrals = groups.filter(g => g.isReferralSource);
+  // Flatten to rows
+  let rows = flattenToTableRows(filtered);
 
-  let html = '';
-
-  if (filter === 'ALL') {
-    html += visible.map(g => renderCompanyCard(g)).join('');
-
-    if (referrals.length > 0) {
-      html += `<div class="section-divider"><span>🤝 REFERRAL SOURCES (${referrals.length})</span></div>`;
-      html += referrals.map(g => renderCompanyCard(g)).join('');
-    }
-
-    if (skipped.length > 0) {
-      html += `
-        <div class="skip-toggle" id="skip-toggle" onclick="toggleSkipSection()">
-          <span>▼ Show ${skipped.length} excluded compan${skipped.length === 1 ? 'y' : 'ies'} (customers, competitors, low scores)</span>
-        </div>
-        <div id="skip-section" class="hidden">
-          ${skipped.map(g => renderCompanyCard(g)).join('')}
-        </div>`;
-    }
-  } else {
-    html += visible.map(g => renderCompanyCard(g)).join('');
-    if (visible.length === 0) {
-      html = `<div class="empty-state">No companies match this filter.</div>`;
-    }
+  // Search filter
+  if (search) {
+    rows = rows.filter(r =>
+      [r.company, r.domain, r.contactName, r.title, r.email,
+       r.outreachHook, r.linkedinReq, r.solution, r.warmPath,
+       r.reasoning, r.icpLabel].some(v => String(v).toLowerCase().includes(search))
+    );
   }
 
-  container.innerHTML = html;
-
-  // Update filter pills active state
-  document.querySelectorAll('.filter-pill').forEach(pill => {
-    pill.classList.toggle('active', pill.dataset.filter === filter);
-  });
-
-  // Activate copy buttons
-  activateCopyButtons();
-}
-
-function renderStatsBar(stats) {
-  return `
-    <div class="stat-item stat-total">${fmt(stats.total)} Total</div>
-    <div class="stat-item stat-pursue">✓ ${fmt(stats.pursue)} Pursue</div>
-    <div class="stat-item stat-research">🔍 ${fmt(stats.research)} Research</div>
-    <div class="stat-item stat-monitor">○ ${fmt(stats.monitor)} Monitor</div>
-    ${stats.referral ? `<div class="stat-item stat-referral">🤝 ${fmt(stats.referral)} Referral</div>` : ''}
-    <div class="stat-item stat-skip">× ${fmt(stats.skip)} Skip</div>
-    ${stats.customers ? `<div class="stat-item stat-customers">★ ${fmt(stats.customers)} Customers</div>` : ''}
+  // Summary
+  const testBadge = APP_STATE.testMode ? `<span class="test-mode-badge">Test mode — ${allGroups.length} of ${APP_STATE.companyGroups.length} companies</span>` : '';
+  document.getElementById('results-summary').innerHTML = `
+    <span class="summary-count">Showing <strong>${fmt(rows.length)}</strong> of <strong>${fmt(flattenToTableRows(allGroups).length)}</strong></span>
+    <span class="summary-divider">·</span>
+    <span class="summary-pursue">${fmt(stats.pursue)} Pursue</span>
+    <span class="summary-divider">·</span>
+    <span class="summary-research">${fmt(stats.research)} Research</span>
+    <span class="summary-divider">·</span>
+    <span class="summary-monitor">${fmt(stats.monitor)} Monitor</span>
+    ${stats.referral ? `<span class="summary-divider">·</span><span class="summary-referral">${fmt(stats.referral)} Referral</span>` : ''}
+    <span class="summary-divider">·</span>
+    <span class="summary-skip">${fmt(stats.skip)} Skip</span>
+    ${stats.customers ? `<span class="summary-divider">·</span><span class="summary-customers">${fmt(stats.customers)} Customers</span>` : ''}
+    ${testBadge}
   `;
-}
 
-function renderCompanyCard(group) {
-  const isBdr = APP_STATE.viewMode === 'bdr';
-  const compScore = Math.max(group.icpScore || 0, group.tvcScore || 0);
-  const action = group.companyAction;
-
-  const badges = renderBadges(group);
-  const scoreDisplay = renderScoreDisplay(group);
-  const auditIndicator = renderAuditIndicator(group);
-
-  let contactsHtml = '';
-  if (!APP_STATE.isCompanyOnlyList && group.contacts && group.contacts.length > 0) {
-    const coverage = renderCoverageIndicator(group);
-    if (action === 'RESEARCH_CONTACTS') {
-      const suggestedRole = getSuggestedRole(group);
-      contactsHtml = `
-        <div class="research-callout">
-          ⚠ No decision-maker found → Find: <strong>${escHtml(suggestedRole)}</strong>
-        </div>
-        <div class="coverage-line">${coverage}</div>
-        <div class="contact-list">
-          ${group.contacts.map(c => renderContactRow(c, group)).join('')}
-        </div>`;
-    } else {
-      contactsHtml = `
-        <div class="coverage-line">${coverage}</div>
-        <div class="contact-list">
-          ${group.contacts.map(c => renderContactRow(c, group)).join('')}
-        </div>`;
-    }
-  } else if (APP_STATE.isCompanyOnlyList) {
-    contactsHtml = `<div class="no-contacts-note">No contacts on list</div>`;
-  }
-
-  const hookHtml = group.outreachHook ? `
-    <div class="hook-row">
-      <span class="hook-label">Hook:</span>
-      <span class="hook-text">${escHtml(group.outreachHook)}</span>
-      <button class="copy-btn" data-text="${escHtml(group.outreachHook)}">📋 Copy</button>
-    </div>` : '';
-
-  // Full view extras
-  let fullExtras = '';
-  if (!isBdr && action !== 'SKIP') {
-    fullExtras = `
-      <div class="full-extras">
-        ${group.tvcScore > 1 ? `<div class="extra-row"><span class="extra-label">TVC Score:</span> <span class="score-badge ${scoreColorClass(group.tvcScore)}">${group.tvcScore} — ${escHtml(group.tvcLabel || '')}</span></div>` : ''}
-        ${group.confidence ? `<div class="extra-row"><span class="extra-label">Confidence:</span> <span class="conf-badge conf-${(group.confidence||'').toLowerCase()}">${group.confidence}</span></div>` : ''}
-        ${group.outreachAngle ? `<div class="extra-row"><span class="extra-label">Angle:</span> ${escHtml(group.outreachAngle)}</div>` : ''}
-        ${group.primarySolution ? `<div class="extra-row"><span class="extra-label">Solution:</span> ${escHtml(group.primarySolution)}${group.secondarySolutions?.length ? ' · ' + group.secondarySolutions.map(escHtml).join(' · ') : ''}</div>` : ''}
-        ${group.relevantReferences?.length ? `<div class="extra-row"><span class="extra-label">Refs:</span> ${group.relevantReferences.map(escHtml).join(', ')}</div>` : ''}
-        ${group.reasoning ? `<div class="extra-row"><span class="extra-label">Why:</span> <em>${escHtml(group.reasoning)}</em></div>` : ''}
-        ${group.auditVerdict && group.auditReasoning ? `<div class="extra-row audit-reasoning"><span class="extra-label">Audit:</span> ${escHtml(group.auditReasoning)}</div>` : ''}
-        ${group.auditSolutionCorrection ? `<div class="extra-row audit-correction"><span class="extra-label">Solution corrected:</span> ${escHtml(group.auditSolutionCorrection)}</div>` : ''}
-      </div>`;
-  }
-
-  const cardClass = `company-card action-card-${(action||'skip').toLowerCase()} ${group.flags.isExistingCustomer ? 'card-customer' : ''} ${group.isReferralSource ? 'card-referral' : ''}`;
-
-  return `
-    <div class="${cardClass}" data-domain="${escHtml(group.domain)}">
-      <div class="card-header">
-        <div class="card-header-left">
-          <span class="company-name">${escHtml(group.companyName)}</span>
-          <span class="company-domain">${escHtml(group.domain)}</span>
-          <div class="badge-row">${badges}</div>
-        </div>
-        <div class="card-header-right">
-          ${scoreDisplay}
-          ${auditIndicator}
-          <div class="action-pill">${actionBadge(action)}</div>
-        </div>
-      </div>
-      ${hookHtml}
-      ${fullExtras}
-      ${contactsHtml}
-    </div>`;
-}
-
-function renderContactRow(contact, group) {
-  const isBdr = APP_STATE.viewMode === 'bdr';
-  const scoreClass = scoreColorClass(contact.contactScore || 0);
-  const liHtml = contact.linkedinRequest ? `
-    <div class="li-row">
-      <span class="li-text">${escHtml(contact.linkedinRequest)}</span>
-      <button class="copy-btn copy-btn-sm" data-text="${escHtml(contact.linkedinRequest)}">📋</button>
-    </div>` : '';
-
-  let extraContact = '';
-  if (!isBdr) {
-    extraContact = `
-      ${contact.contactReasoning ? `<div class="contact-reasoning">${escHtml(contact.contactReasoning)}</div>` : ''}
-      ${contact.championPath ? `<div class="champion-path">💡 ${escHtml(contact.championPath)}</div>` : ''}`;
-  }
-
-  return `
-    <div class="contact-row contact-score-${contact.contactScore || 0}">
-      <div class="contact-row-top">
-        <span class="contact-name">${escHtml(contact.name || '—')}</span>
-        <span class="contact-title">${escHtml(contact.title || '')}</span>
-        <span class="contact-score ${scoreClass}">${contact.contactScore || '—'}</span>
-        ${actionBadge(contact.contactAction)}
-      </div>
-      ${liHtml}
-      ${extraContact}
-    </div>`;
-}
-
-function renderBadges(group) {
-  const badges = [];
-  if (group.flags.isTier1Target && !group.flags.isExistingCustomer) {
-    badges.push('<span class="badge badge-tier1">⭐ TIER 1</span>');
-  }
-  if (group.flags.isExistingCustomer) {
-    badges.push('<span class="badge badge-customer">★ CUSTOMER</span>');
-  }
-  if (group.flags.isCompetitor && !group.flags.isTvcEligibleCompetitor) {
-    badges.push('<span class="badge badge-competitor">⚠ COMPETITOR</span>');
-  }
-  if (group.flags.isTvcEligibleCompetitor) {
-    badges.push('<span class="badge badge-tvc-comp">🔒 TVC PROSPECT</span>');
-  }
-  if (group.isReferralSource) {
-    badges.push('<span class="badge badge-referral">🤝 REFERRAL SOURCE</span>');
-  }
-  if (group.flags.warmPath) {
-    badges.push(`<span class="badge badge-warm">🔗 ${escHtml(group.flags.warmPath)}</span>`);
-  }
-  if (group.flags.isTurnkeyEmployee) {
-    badges.push('<span class="badge badge-employee">🏢 TURNKEY</span>');
-  }
-  if (group.scoringFailed) {
-    badges.push('<span class="badge badge-failed">⚠ SCORING FAILED</span>');
-  }
-  return badges.join('');
-}
-
-function renderScoreDisplay(group) {
-  const icpScore = group.icpScore || 0;
-  const tvcScore = group.tvcScore || 0;
-  const compScore = Math.max(icpScore, tvcScore);
-  const isBdr = APP_STATE.viewMode === 'bdr';
-
-  let html = `<div class="score-display">`;
-  html += `<span class="score-icp ${scoreColorClass(icpScore)}">ICP: ${icpScore}</span>`;
-  if (!isBdr && tvcScore > 1) {
-    html += `<span class="score-tvc ${scoreColorClass(tvcScore)}">TVC: ${tvcScore}</span>`;
-  } else if (tvcScore > 1) {
-    html += `<span class="score-tvc ${scoreColorClass(tvcScore)}">TVC: ${tvcScore}</span>`;
-  }
-  html += `</div>`;
-  return html;
-}
-
-function renderAuditIndicator(group) {
-  if (!group.auditVerdict) return '';
-  if (group.auditVerdict === 'UPGRADE') {
-    return `<div class="audit-indicator audit-upgrade">${group.originalIcpScore} → ${group.icpScore} ⬆</div>`;
-  }
-  if (group.auditVerdict === 'DOWNGRADE') {
-    return `<div class="audit-indicator audit-downgrade">${group.originalIcpScore} → ${group.icpScore} ⬇</div>`;
-  }
-  return `<div class="audit-indicator audit-confirm">✓ Confirmed</div>`;
-}
-
-function renderCoverageIndicator(group) {
-  const contacts = group.contacts || [];
-  if (contacts.length === 0) return '';
-  const decisionMakers = contacts.filter(c => (c.contactScore || 0) >= 4).length;
-  const best = Math.max(0, ...contacts.map(c => c.contactScore || 0));
-  let icon, cls;
-  if (decisionMakers > 0) { icon = '✓'; cls = 'coverage-good'; }
-  else if (best >= 3)     { icon = '⚠'; cls = 'coverage-warn'; }
-  else                    { icon = '✗'; cls = 'coverage-bad'; }
-  return `<span class="coverage-indicator ${cls}">${icon} ${decisionMakers} of ${contacts.length} decision-maker${contacts.length !== 1 ? 's' : ''}</span>`;
-}
-
-function toggleSkipSection() {
-  const sec = document.getElementById('skip-section');
-  const btn = document.getElementById('skip-toggle');
-  if (!sec || !btn) return;
-  const isHidden = sec.classList.contains('hidden');
-  sec.classList.toggle('hidden', !isHidden);
-  btn.querySelector('span').textContent = isHidden
-    ? `▲ Hide excluded companies`
-    : `▼ Show ${sec.querySelectorAll('.company-card').length} excluded compan${sec.querySelectorAll('.company-card').length === 1 ? 'y' : 'ies'} (customers, competitors, low scores)`;
-}
-
-function activateCopyButtons() {
-  document.querySelectorAll('.copy-btn').forEach(btn => {
-    btn.onclick = () => copyToClipboard(btn.dataset.text, btn);
+  // Update filter pill active state
+  document.querySelectorAll('.filter-pill').forEach(p => {
+    p.classList.toggle('active', p.dataset.filter === filter);
   });
+
+  // Render table
+  renderTable(rows);
+
+  // Columns menu
+  renderColumnsMenu();
+
+  // Enable export if we have rows
+  if (rows.length > 0) {
+    document.getElementById('export-btn')?.removeAttribute('disabled');
+  }
+}
+
+// ---- Table rendering ----
+
+function renderTable(rows) {
+  const cols = COLUMN_DEFS.filter(c => APP_STATE.visibleColumns.has(c.key));
+
+  // Header
+  document.getElementById('table-head').innerHTML = `
+    <tr>
+      ${cols.map(c => `<th class="th-${c.key}" onclick="sortByColumn('${c.key}')">${c.label}${APP_STATE.sortCol === c.key ? (APP_STATE.sortDir === 'asc' ? ' ▲' : ' ▼') : ''}</th>`).join('')}
+    </tr>`;
+
+  // Body
+  let prevCompany = null;
+  const tbody = document.getElementById('table-body');
+  tbody.innerHTML = rows.map((r, i) => {
+    const isNewCompany = r.company !== prevCompany;
+    prevCompany = r.company;
+    const rowClass = isNewCompany ? 'tr-company-start' : 'tr-same-company';
+    return `<tr class="${rowClass} tr-action-${(r.companyAction||'skip').toLowerCase()}" data-row="${i}">
+      ${cols.map(c => renderCell(c.key, r)).join('')}
+    </tr>`;
+  }).join('');
+
+  // Bind copy buttons
+  tbody.querySelectorAll('.copy-btn').forEach(btn => {
+    btn.onclick = e => { e.stopPropagation(); copyToClipboard(btn.dataset.text, btn); };
+  });
+}
+
+function renderCell(key, r) {
+  switch (key) {
+    case 'company':
+      return `<td class="td-company">
+        <div class="cell-company-name">${escHtml(r.company)}</div>
+        ${renderRowBadges(r)}
+      </td>`;
+
+    case 'domain':
+      return `<td class="td-domain"><span class="cell-muted">${escHtml(r.domain)}</span></td>`;
+
+    case 'contactName':
+      return `<td class="td-contact">${escHtml(r.contactName)}</td>`;
+
+    case 'title':
+      return `<td class="td-title"><span class="cell-muted">${escHtml(r.title)}</span></td>`;
+
+    case 'email':
+      return `<td class="td-email"><span class="cell-muted">${escHtml(r.email)}</span></td>`;
+
+    case 'icpScore': {
+      const s = r.icpScore;
+      const changed = r.auditVerdict === 'UPGRADE' || r.auditVerdict === 'DOWNGRADE';
+      const diff = changed ? `<span class="audit-diff">${r.originalScore}→${s}</span>` : '';
+      return `<td class="td-score"><span class="score-chip ${scoreColorClass(s)}">${s}</span>${diff}</td>`;
+    }
+
+    case 'tvcScore': {
+      const s = r.tvcScore;
+      return `<td class="td-score"><span class="score-chip ${scoreColorClass(s)}">${s || '—'}</span></td>`;
+    }
+
+    case 'contactScore': {
+      const s = r.contactScore;
+      return `<td class="td-score">${s !== '' ? `<span class="score-chip ${scoreColorClass(s)}">${s}</span>` : '<span class="cell-muted">—</span>'}</td>`;
+    }
+
+    case 'companyAction':
+      return `<td class="td-action">${actionChip(r.companyAction)}</td>`;
+
+    case 'contactAction':
+      return `<td class="td-action">${r.contactAction ? actionChip(r.contactAction) : '<span class="cell-muted">—</span>'}</td>`;
+
+    case 'warmPath':
+      return `<td class="td-warm">${r.warmPath ? `<span class="warm-chip">🔗 ${escHtml(r.warmPath)}</span>` : '<span class="cell-muted">—</span>'}</td>`;
+
+    case 'outreachHook':
+      return `<td class="td-hook">
+        ${r.outreachHook
+          ? `<span class="cell-truncate">${escHtml(r.outreachHook)}</span>
+             <button class="copy-btn" data-text="${escHtml(r.outreachHook)}">Copy</button>`
+          : '<span class="cell-muted">—</span>'}
+      </td>`;
+
+    case 'linkedinReq':
+      return `<td class="td-li">
+        ${r.linkedinReq
+          ? `<span class="cell-truncate">${escHtml(r.linkedinReq)}</span>
+             <button class="copy-btn" data-text="${escHtml(r.linkedinReq)}">Copy</button>`
+          : '<span class="cell-muted">—</span>'}
+      </td>`;
+
+    case 'solution':
+      return `<td class="td-solution"><span class="cell-muted">${escHtml(r.solution)}</span></td>`;
+
+    case 'confidence':
+      return `<td class="td-conf"><span class="conf-chip conf-${(r.confidence||'').toLowerCase()}">${r.confidence || '—'}</span></td>`;
+
+    case 'reasoning':
+      return `<td class="td-reasoning"><span class="cell-truncate cell-muted">${escHtml(r.reasoning)}</span></td>`;
+
+    default:
+      return `<td>${escHtml(r[key] || '')}</td>`;
+  }
+}
+
+function renderRowBadges(r) {
+  const badges = [];
+  if (r.isTier1 && !r.isCustomer)  badges.push(`<span class="row-badge rb-tier1">T1</span>`);
+  if (r.isCustomer)                 badges.push(`<span class="row-badge rb-customer">Customer</span>`);
+  if (r.isCompetitor && !r.isReferral) badges.push(`<span class="row-badge rb-competitor">Competitor</span>`);
+  if (r.isReferral)                 badges.push(`<span class="row-badge rb-referral">Referral</span>`);
+  if (r._group?.flags?.isTvcEligibleCompetitor) badges.push(`<span class="row-badge rb-tvc">TVC</span>`);
+  if (r.auditVerdict === 'UPGRADE') badges.push(`<span class="row-badge rb-audit-up">⬆ Upgraded</span>`);
+  if (r.auditVerdict === 'DOWNGRADE') badges.push(`<span class="row-badge rb-audit-down">⬇ Downgraded</span>`);
+  if (!badges.length) return '';
+  return `<div class="row-badges">${badges.join('')}</div>`;
+}
+
+function actionChip(action) {
+  const cfg = ACTION_CONFIG[action] || { label: action || '—', cls: 'action-skip' };
+  return `<span class="action-chip ${cfg.cls}">${cfg.label}</span>`;
+}
+
+// ---- Columns menu ----
+
+function renderColumnsMenu() {
+  const menu = document.getElementById('columns-menu');
+  if (!menu) return;
+  menu.innerHTML = COLUMN_DEFS.map(c => `
+    <label class="col-toggle">
+      <input type="checkbox" ${APP_STATE.visibleColumns.has(c.key) ? 'checked' : ''}
+        onchange="toggleColumn('${c.key}', this.checked)">
+      ${c.label}
+    </label>`).join('');
+}
+
+function toggleColumnsMenu() {
+  const menu = document.getElementById('columns-menu');
+  if (menu) menu.classList.toggle('hidden');
+  // Close on outside click
+  setTimeout(() => {
+    document.addEventListener('click', function closeMenu(e) {
+      if (!e.target.closest('.btn-columns') && !e.target.closest('.columns-menu')) {
+        menu?.classList.add('hidden');
+        document.removeEventListener('click', closeMenu);
+      }
+    });
+  }, 0);
+}
+
+function toggleColumn(key, visible) {
+  if (visible) APP_STATE.visibleColumns.add(key);
+  else APP_STATE.visibleColumns.delete(key);
+  renderTable(getCurrentRows());
+  renderColumnsMenu();
+}
+
+function getCurrentRows() {
+  const filter = APP_STATE.currentFilter || 'ALL';
+  const search = (document.getElementById('table-search')?.value || '').toLowerCase().trim();
+  const allGroups = sortCompanies(APP_STATE.companyGroups);
+  let filtered = allGroups.filter(g => {
+    if (filter === 'ALL') return true;
+    if (filter === 'PURSUE')   return g.companyAction === 'PURSUE';
+    if (filter === 'RESEARCH') return g.companyAction === 'RESEARCH_CONTACTS';
+    if (filter === 'MONITOR')  return g.companyAction === 'MONITOR';
+    if (filter === 'REFERRAL') return g.isReferralSource;
+    if (filter === 'SKIP')     return g.companyAction === 'SKIP';
+    return true;
+  });
+  let rows = flattenToTableRows(filtered);
+  if (search) {
+    rows = rows.filter(r =>
+      [r.company, r.domain, r.contactName, r.title, r.email,
+       r.outreachHook, r.linkedinReq, r.solution, r.warmPath,
+       r.reasoning, r.icpLabel].some(v => String(v).toLowerCase().includes(search))
+    );
+  }
+  return rows;
+}
+
+// ---- Sort by column ----
+
+function sortByColumn(key) {
+  if (APP_STATE.sortCol === key) {
+    APP_STATE.sortDir = APP_STATE.sortDir === 'asc' ? 'desc' : 'asc';
+  } else {
+    APP_STATE.sortCol = key;
+    APP_STATE.sortDir = 'desc';
+  }
+  renderResults();
+}
+
+// ---- Search handler ----
+
+function onSearchChange() {
+  renderResults();
 }
 
 // ---- Progress update ----
@@ -413,29 +467,29 @@ function activateCopyButtons() {
 function updateScoringProgress() {
   const { companyTotal, companyDone, contactTotal, contactDone } = APP_STATE.scoringProgress;
 
-  const cBar = document.getElementById('company-progress-bar');
+  const cBar  = document.getElementById('company-progress-bar');
   const cText = document.getElementById('company-progress-text');
-  if (cBar && companyTotal > 0) {
-    cBar.style.width = `${Math.round((companyDone / companyTotal) * 100)}%`;
-  }
-  if (cText) {
-    cText.textContent = companyTotal > 0
-      ? `${companyDone} / ${companyTotal} companies`
-      : 'Preparing…';
-  }
+  if (cBar && companyTotal > 0) cBar.style.width = `${Math.round((companyDone / companyTotal) * 100)}%`;
+  if (cText) cText.textContent = companyTotal > 0 ? `${companyDone} / ${companyTotal} companies` : 'Preparing…';
 
-  const coBar = document.getElementById('contact-progress-bar');
+  const coBar  = document.getElementById('contact-progress-bar');
   const coText = document.getElementById('contact-progress-text');
-  if (coBar && contactTotal > 0) {
-    coBar.style.width = `${Math.round((contactDone / contactTotal) * 100)}%`;
-  }
+  if (coBar && contactTotal > 0) coBar.style.width = `${Math.round((contactDone / contactTotal) * 100)}%`;
   if (coText) {
-    if (contactTotal === 0 && companyDone < companyTotal) {
-      coText.textContent = 'Waiting for company scoring…';
-    } else if (contactTotal === 0 && APP_STATE.isCompanyOnlyList) {
-      coText.textContent = 'Skipped (company-only list)';
-    } else {
-      coText.textContent = contactTotal > 0 ? `${contactDone} / ${contactTotal} contacts` : 'Preparing…';
-    }
+    if (APP_STATE.isCompanyOnlyList) coText.textContent = 'Skipped (company-only list)';
+    else if (contactTotal === 0 && companyDone < companyTotal) coText.textContent = 'Waiting for company scoring…';
+    else coText.textContent = contactTotal > 0 ? `${contactDone} / ${contactTotal} contacts` : 'Preparing…';
   }
+}
+
+function getSuggestedRole(group) {
+  if (group.auditContactGap) return group.auditContactGap;
+  const angle = group.outreachAngle || '';
+  if (angle === 'VERIFIABLE_COMPUTE') return 'Head of Digital Assets / CISO';
+  const score = group.icpScore || 0;
+  if (score >= 5) {
+    const isCrypto = ['TRANSACTION_SIGNING','KEY_MANAGEMENT','AGENTIC_WALLETS'].includes(angle) || angle === 'USER_WALLETS';
+    return isCrypto ? 'CTO, VP Engineering, or Head of Protocol' : 'Head of Crypto / Head of Digital Assets';
+  }
+  return 'CTO or Head of Engineering';
 }

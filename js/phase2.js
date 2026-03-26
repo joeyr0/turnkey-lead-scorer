@@ -245,6 +245,9 @@ async function scoreCompanies() {
     if (i + 10 < toScore.length) {
       await sleep(800);
     }
+
+    // Check for stop request
+    if (APP_STATE.stopRequested) break;
   }
 }
 
